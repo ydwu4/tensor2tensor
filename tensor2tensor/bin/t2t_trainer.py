@@ -56,6 +56,7 @@ flags.DEFINE_string("tpu_job_name", None,
 flags.DEFINE_integer("iterations_per_loop", 100,
                      "Number of iterations in a TPU training loop.")
 flags.DEFINE_bool("use_tpu", False, "Whether to use TPU.")
+flags.DEFINE_bool("use_edl", False, "Whether to use edl for distributed training.")
 flags.DEFINE_bool("use_tpu_estimator", False, "Whether to use TPUEstimator. "
                   "This is always enabled when use_tpu is True.")
 flags.DEFINE_integer("export_saved_model_api_version", 1,
@@ -187,6 +188,7 @@ def create_hparams():
 
 def create_experiment_fn():
   return trainer_lib.create_experiment_fn(
+      use_edl=FLAGS.use_edl,
       model_name=FLAGS.model,
       problem_name=FLAGS.problem,
       data_dir=os.path.expanduser(FLAGS.data_dir),

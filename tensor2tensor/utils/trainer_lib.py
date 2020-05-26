@@ -126,8 +126,10 @@ def create_session_config(log_device_placement=False,
               do_function_inlining=False,
               global_jit_level=xla_jit_level))
 
-  gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=gpu_mem_fraction)
 
+  import edl.tensorflow as ehvd
+  print("setting my device to be:", ehvd.my_device())
+  gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=gpu_mem_fraction, allow_growth=True, visible_device_list=str(ehvd.my_device()))
   config = tf.ConfigProto(
       allow_soft_placement=True,
       graph_options=graph_options,
@@ -435,16 +437,18 @@ class T2TExperiment(object):
   """Custom Experiment class for running distributed experiments."""
 
   def __init__(self, estimator, hparams, train_spec, eval_spec,
-               use_validation_monitor, decode_hparams=None):
+               use_validation_monitor, decode_hparams=None, server=None):
     self._train_spec = train_spec
     self._eval_spec = eval_spec
     self._hparams = hparams
     self._decode_hparams = decode_hparams
     self._estimator = estimator
     self._use_validation_monitor = use_validation_monitor
+    self._server = server
 
   @property
   def estimator(self):
+    tf.logging.info('run_std_server called')
     return self._estimator
 
   @property
@@ -593,7 +597,9 @@ class T2TExperiment(object):
         job_name=config.task_type,
         task_index=config.task_id,
         protocol=config.protocol)
+    print("before running std server")
     server.join()
+    print("after running std server")
 
   def decode(self,
              dataset_split=None,
@@ -669,6 +675,42 @@ class T2TExperiment(object):
                              self._decode_hparams.decode_timeout_mins):
       self.decode(decode_from_file=True)
 
+import time
+t1 = time.time()
+t2 = time.time()
+count = 0
+acc = 0
+import edl.tensorflow as ehvd
+ehvd.init()
+
+class edl_hook(tf.train.SessionRunHook):
+  def begin(self):
+    print("hook begin, importing ehvd")
+    ehvd.try_reinit_nccl()
+    ehvd.need_bcast()
+  def before_run(self, run_context):
+    global t1 
+    t1 = time.time()
+    print("hook before run")
+  def after_run(self, run_context, run_values):
+    global t2,count,acc
+    t2 = time.time()
+    count += 1
+    acc += t2-t1
+    import edl.tensorflow as ehvd
+    ehvd.try_reinit_nccl()
+    print("hook after run duratoin:", t2 - t1, 'avg duration', acc/count)
+
+
+def create_tf_server(config):                                                                                                                                                                                                                                                                                                                                                                                                                                                  
+  server = tf.train.Server(
+    config.cluster_spec,
+    job_name=config.task_type,
+    task_index=config.task_id,
+    #config=config.tf_config,
+    start=True)
+  return server
+
 
 def create_experiment(
     run_config,
@@ -678,6 +720,7 @@ def create_experiment(
     data_dir,
     train_steps,
     eval_steps,
+    use_edl=False,
     min_eval_frequency=2000,
     eval_throttle_seconds=600,
     schedule="train_and_evaluate",
@@ -721,6 +764,12 @@ def create_experiment(
     if decode_reference and not decode_hparams.decode_reference:
       decode_hparams.decode_reference = decode_reference
   add_problem_hparams(hparams, problem_name)
+
+
+  server = None
+  if getattr(run_config,"cluster_spec") and schedule !="run_std_server":
+    print("starting create tf server")
+    server = create_tf_server(run_config)
 
   # Estimator
   estimator = create_estimator(
@@ -806,6 +855,9 @@ def create_experiment(
       estimator=estimator, problem=problem, hparams=hparams)
 
   train_hooks += t2t_model.T2TModel.get_train_hooks(model_name, hook_context)
+  # ttt modification point ----------------
+  if (use_edl):
+    train_hooks += [edl_hook()]
   eval_hooks += t2t_model.T2TModel.get_eval_hooks(model_name, hook_context)
   if additional_train_hooks:
     train_hooks += additional_train_hooks
@@ -828,9 +880,7 @@ def create_experiment(
       exporters=exporter)
 
   return T2TExperiment(estimator, hparams, train_spec, eval_spec,
-                       use_validation_monitor, decode_hparams)
-
-
+                       use_validation_monitor, decode_hparams, server)
 def create_experiment_fn(*args, **kwargs):
   """Wrapper for canonical experiment_fn. See create_experiment."""
 
