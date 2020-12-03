@@ -44,6 +44,7 @@ def optimize(loss,
              learning_rate,
              hparams,
              use_tpu=False,
+             use_hvd=True,
              variables=None):
   """Minimize loss."""
   loss = weight_decay_and_noise(loss, hparams, learning_rate)
@@ -67,6 +68,10 @@ def optimize(loss,
   log_variable_sizes(
       diet_vars, "Diet Variables", verbose=hparams.summarize_vars)
   opt = ConditionalOptimizer(hparams.optimizer, learning_rate, hparams, use_tpu)
+  if use_hvd:
+    print("in use_hvd optimize")
+    import horovod.tensorflow as hvd
+    opt = hvd.DistributedOptimizer(opt)
   if use_tpu:
     opt = tf.contrib.tpu.CrossShardOptimizer(opt)
   if getattr(hparams, "gpu_automatic_mixed_precision", False):

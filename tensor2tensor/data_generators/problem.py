@@ -836,6 +836,7 @@ class Problem(object):
                force_repeat=False,
                prevent_repeat=False,
                dataset_kwargs=None):
+    print('Here in input fn')
     """Builds input pipeline for problem.
 
     Args:

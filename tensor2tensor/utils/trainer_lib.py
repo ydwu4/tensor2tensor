@@ -127,9 +127,11 @@ def create_session_config(log_device_placement=False,
               global_jit_level=xla_jit_level))
 
 
-  import edl.tensorflow as ehvd
-  print("setting my device to be:", ehvd.my_device())
-  gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=gpu_mem_fraction, allow_growth=True, visible_device_list=str(ehvd.my_device()))
+  #import edl.tensorflow as ehvd
+  #print("setting my device to be:", ehvd.my_device())
+  import horovod.tensorflow as hvd
+  gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=gpu_mem_fraction, allow_growth=True, visible_device_list=str(hvd.local_rank()))
+  print('hehehaha')
   config = tf.ConfigProto(
       allow_soft_placement=True,
       graph_options=graph_options,
@@ -680,26 +682,63 @@ t1 = time.time()
 t2 = time.time()
 count = 0
 acc = 0
-import edl.tensorflow as ehvd
-ehvd.init()
+import horovod.tensorflow as hvd
+hvd.init()
+#import edl.tensorflow as ehvd
+#ehvd.init()
 
-class edl_hook(tf.train.SessionRunHook):
+#class edl_hook(tf.train.SessionRunHook):
+#  def begin(self):
+#    print("hook begin, importing ehvd")
+#    ehvd.try_reinit_nccl()
+#    ehvd.need_bcast()
+#  def before_run(self, run_context):
+#    global t1 
+#    t1 = time.time()
+#    print("hook before run")
+#  def after_run(self, run_context, run_values):
+#    global t2,count,acc
+#    t2 = time.time()
+#    count += 1
+#    acc += t2-t1
+#    import edl.tensorflow as ehvd
+#    ehvd.try_reinit_nccl()
+#    print("hook after run duratoin:", t2 - t1, 'avg duration', acc/count)
+
+class bench_hook(tf.train.SessionRunHook):
   def begin(self):
-    print("hook begin, importing ehvd")
-    ehvd.try_reinit_nccl()
-    ehvd.need_bcast()
+    print("hook begin")
+
   def before_run(self, run_context):
     global t1 
     t1 = time.time()
     print("hook before run")
+
   def after_run(self, run_context, run_values):
     global t2,count,acc
     t2 = time.time()
     count += 1
-    acc += t2-t1
-    import edl.tensorflow as ehvd
-    ehvd.try_reinit_nccl()
-    print("hook after run duratoin:", t2 - t1, 'avg duration', acc/count)
+    if count > 3:
+      acc += t2-t1
+      print("hook after run duratoin:", t2 - t1, 'avg duration', acc/(count-3), 's')
+
+#class hvd_hook(tf.train.SessionRunHook):
+  #def begin(self):
+  #  print("hook begin, importing ehvd")
+  #  ehvd.try_reinit_nccl()
+  #  ehvd.need_bcast()
+  #def before_run(self, run_context):
+  #  global t1 
+  #  t1 = time.time()
+  #  print("hook before run")
+  #def after_run(self, run_context, run_values):
+  #  global t2,count,acc
+  #  t2 = time.time()
+  #  count += 1
+  #  acc += t2-t1
+  #  import edl.tensorflow as ehvd
+  #  ehvd.try_reinit_nccl()
+  #  print("hook after run duratoin:", t2 - t1, 'avg duration', acc/count)
 
 
 def create_tf_server(config):                                                                                                                                                                                                                                                                                                                                                                                                                                                  
@@ -721,6 +760,7 @@ def create_experiment(
     train_steps,
     eval_steps,
     use_edl=False,
+    use_hvd=True,
     min_eval_frequency=2000,
     eval_throttle_seconds=600,
     schedule="train_and_evaluate",
@@ -858,6 +898,10 @@ def create_experiment(
   # ttt modification point ----------------
   if (use_edl):
     train_hooks += [edl_hook()]
+  train_hooks += [bench_hook()]
+  if use_hvd:
+    print("in use_hvd hook")
+    train_hooks += [hvd.BroadcastGlobalVariablesHook(0)]
   eval_hooks += t2t_model.T2TModel.get_eval_hooks(model_name, hook_context)
   if additional_train_hooks:
     train_hooks += additional_train_hooks

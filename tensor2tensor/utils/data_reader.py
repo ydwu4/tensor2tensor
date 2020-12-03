@@ -322,6 +322,7 @@ def input_fn(dataset,
              config=None,
              force_repeat=False,
              prevent_repeat=False):
+  print('input fn', data_dir)
   """Builds input pipeline for problem.
 
   Args:
